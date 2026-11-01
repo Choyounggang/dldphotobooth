@@ -204,6 +204,10 @@ body.in-guest{background:#e4e4e8;background-image:none}
 .in-guest .gb-card{box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .in-guest .gb-msg{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .in-guest .gb-del{color:#6a6a72}
+/* booth: camera + controls sit in the middle of the screen */
+.in-booth #booth{display:flex;flex-direction:column;min-height:calc(100vh - 76px);min-height:calc(100dvh - 76px)}
+.in-booth .booth-main{margin-block:auto;width:100%;padding-block:12px}
+@media (max-width:640px){.in-booth .controls{gap:10px}.in-booth .zoom input{width:84px}.in-booth .btn{padding:8px 12px;font-size:14px}}
 .chip{all:unset;cursor:pointer;font-family:var(--pixel);font-size:12px;letter-spacing:.06em;padding:8px 14px;border-radius:999px;border:2px solid var(--ink);background:var(--paper)}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--lime)}
 .chip:focus-visible{outline:3px dashed var(--hot);outline-offset:2px}
@@ -233,6 +237,7 @@ body.in-guest{background:#e4e4e8;background-image:none}
     <div class="bar">
       <button class="btn" id="back" type="button">Back</button>
     </div>
+    <div class="booth-main">
     <div class="stage">
       <canvas id="view" width="1536" height="1024" aria-label="Camera preview"></canvas>
       <div class="flash" id="flash"></div>
@@ -252,6 +257,7 @@ body.in-guest{background:#e4e4e8;background-image:none}
       <div class="c-right"><label class="btn" for="file">Load Photo</label></div>
     </div>
 
+    </div>
     <div id="result" hidden>
       <div class="printer" id="printer"></div>
       <div class="paper-wrap">
@@ -484,7 +490,16 @@ try{window.claude?.use?.("downloads").then(d=>downloads=d).catch(()=>{});}catch(
 async function saveBlob(blob,name,st){
   if(downloads){try{await downloads.save({filename:name,data:blob});st.textContent="Saved ♡";}catch(e){st.textContent=e?.code==="declined"?"Save cancelled.":"Saving isn't available here. Long-press or right-click the image to save it.";}return;}
   if(window.claude){st.textContent="Long-press or right-click the image to save it.";return;}
-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();st.textContent="Saved ♡";
+  // phones: hand the PNG to the system share sheet ("Save Image" puts it in the photo album)
+  const png=blob.type==="image/png"?blob:new Blob([blob],{type:"image/png"}),file=new File([png],name,{type:"image/png"});
+  if(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)&&navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file]});st.textContent="Saved ♡";return;}
+    catch(e){if(e&&e.name==="AbortError"){st.textContent="Save cancelled.";return;}}
+  }
+  // everywhere else: a real .png download from a data URL (in-app browsers often refuse blob links)
+  const url=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(png);});
+  const a=document.createElement("a");a.href=url;a.download=name;a.type="image/png";document.body.appendChild(a);a.click();a.remove();
+  st.textContent="Saved as PNG ♡ If nothing downloaded, long-press the photo to save it.";
 }
 $("save").addEventListener("click",()=>{if(lastBlob)saveBlob(lastBlob,`kitsch-booth-${theme.id}-${Date.now()}.png`,$("status"));});
 
