@@ -131,7 +131,9 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(40px,8vw,84px);lin
 @keyframes buzz{50%{transform:translateX(1px)}}
 .paper-wrap{width:min(520px,calc(100% - 40px));margin:-13px auto 0;overflow:hidden;padding-bottom:14px}
 .receipt{background:#fffdf7;color:#2b2430;font-family:"Share Tech Mono","Courier New",monospace;font-size:14px;padding:26px 22px 34px;display:flex;flex-direction:column;gap:8px;
-  box-shadow:0 6px 14px rgba(74,29,63,.18);-webkit-mask:conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) 50%/16px 100%;mask:conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) 50%/16px 100%}
+  position:relative;margin-bottom:10px;box-shadow:0 6px 14px rgba(74,29,63,.12)}
+.receipt::after{content:"";position:absolute;left:0;right:0;bottom:-9px;height:10px;pointer-events:none;
+  background:linear-gradient(135deg,#fffdf7 50%,transparent 50%) 0 0/16px 10px repeat-x,linear-gradient(-135deg,#fffdf7 50%,transparent 50%) 0 0/16px 10px repeat-x}
 .receipt.printing{animation:print 2.8s steps(28,end) both}
 @keyframes print{from{transform:translateY(-100%)}to{transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){.receipt.printing{animation:none}.printer.busy{animation:none}}
@@ -139,7 +141,7 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(40px,8vw,84px);lin
 .r-sub{text-align:center;letter-spacing:.18em;font-size:12px}
 .r-row{display:flex;justify-content:space-between;gap:12px;font-variant-numeric:tabular-nums}
 .r-dash{border:0;border-top:2px dashed #b9aeb9;margin:4px 0;width:100%}
-.receipt img{width:100%;display:block;filter:grayscale(.05) contrast(1.02)}
+.receipt img{width:100%;display:block;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;pointer-events:auto}
 .r-date{text-align:center;letter-spacing:.14em;font-size:15px;padding-top:6px}
 .r-total{font-size:17px;font-weight:700}
 .barcode{height:46px;margin-top:6px;background:repeating-linear-gradient(90deg,#2b2430 0 2px,transparent 2px 4px,#2b2430 4px 7px,transparent 7px 9px,#2b2430 9px 10px,transparent 10px 13px)}
@@ -318,11 +320,10 @@ body.in-guest{background:#e4e4e8;background-image:none}
 
 <div class="savesheet" id="saveSheet" hidden role="dialog" aria-modal="true" aria-labelledby="ssTitle">
   <div class="ss-card">
-    <p class="ss-title" id="ssTitle">Press and hold the photo, then tap “Save Image”.</p>
+    <p class="ss-title" id="ssTitle">Press and hold the photo to save it.</p>
     <img id="ssImg" alt="Your Kitsch Photobooth photo">
-    <p class="ss-note" id="ssNote" hidden>This app’s built-in browser can block saving. Open the page in Safari or Chrome for the easiest save.</p>
+    <p class="ss-note" id="ssNote">iPhone: tap “Save to Photos” · Galaxy: tap “Download image” or “Save image”.</p>
     <div class="ss-actions">
-      <button class="btn" id="ssOpen" type="button" hidden>Open in Browser</button>
       <button class="btn" id="ssClose" type="button">Close</button>
     </div>
   </div>
@@ -509,7 +510,7 @@ $("shoot").addEventListener("click",async()=>{
   out.toBlob(b=>{lastBlob=b;const url=URL.createObjectURL(b);$("resultImg").src=dataUrl;$("result").hidden=false;$("status").textContent="";
     shots.unshift({url,theme:theme.name});if(shots.length>8)shots.pop();shotNo++;
     const d=new Date(),p=n=>String(n).padStart(2,"0");$("rDate").textContent=`${d.getFullYear()}.${p(d.getMonth()+1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-    const rc=$("receipt"),pr=$("printer");rc.classList.remove("printing");void rc.offsetWidth;rc.classList.add("printing");pr.classList.add("busy");setTimeout(()=>pr.classList.remove("busy"),2800);
+    const rc=$("receipt"),pr=$("printer");rc.classList.remove("printing");void rc.offsetWidth;rc.classList.add("printing");rc.addEventListener("animationend",()=>rc.classList.remove("printing"),{once:true});pr.classList.add("busy");setTimeout(()=>pr.classList.remove("busy"),2800);
     $("result").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});},"image/png");
   busy=false;$("shoot").disabled=false;
 });
@@ -521,18 +522,18 @@ try{window.claude?.use?.("downloads").then(d=>downloads=d).catch(()=>{});}catch(
 const UA=navigator.userAgent,IS_PHONE=/Android|iPhone|iPad|iPod/i.test(UA)||(navigator.maxTouchPoints>1&&/Macintosh/.test(UA));
 const INAPP=/KAKAOTALK|Instagram|FBAN|FBAV|FB_IAB|Line\/|NAVER\(inapp|DaumApps|everytimeApp|Whale\/.*inapp|Snapchat|Twitter/i.test(UA);
 function openExternal(){
-  const u=location.href;
+  const view=!$("booth").hidden&&theme?theme.id:!$("guest").hidden?"guestbook":"";
+  const u=location.href.split("#")[0]+(view?"#"+view:"");
   if(/KAKAOTALK/i.test(UA)){location.href="kakaotalk://web/openExternal?url="+encodeURIComponent(u);return true;}
   if(/Android/i.test(UA)){location.href="intent://"+u.replace(/^https?:\/\//,"")+"#Intent;scheme=https;package=com.android.chrome;end";return true;}
   return false;
 }
 function showSaveSheet(){
-  $("ssImg").src=lastDataUrl||$("resultImg").src;$("ssNote").hidden=!INAPP;$("ssOpen").hidden=!(INAPP&&(/KAKAOTALK/i.test(UA)||/Android/i.test(UA)));
+  $("ssImg").src=lastDataUrl||$("resultImg").src;
   $("saveSheet").hidden=false;$("ssClose").focus();
 }
 $("ssClose").onclick=()=>{$("saveSheet").hidden=true;$("save").focus();};
 $("saveSheet").addEventListener("click",e=>{if(e.target.id==="saveSheet")$("saveSheet").hidden=true;});
-$("ssOpen").onclick=()=>openExternal();
 if(INAPP&&!window.claude){$("inapp").hidden=false;if(!(/KAKAOTALK/i.test(UA)||/Android/i.test(UA)))$("inappOpen").hidden=true;}
 $("inappOpen").onclick=()=>openExternal();
 $("inappX").onclick=()=>{$("inapp").hidden=true;};
@@ -688,6 +689,8 @@ const openId=id=>themeReady.then(()=>openTheme(THEMES.find(x=>x.id===id)));
 $("icHouse").onclick=()=>openId("pixel");
 $("icBrush").onclick=()=>openId("palette");
 $("icGuest").onclick=()=>openGuest();
+// a link ending in #pixel, #palette or #guestbook opens straight into that screen
+{const h=location.hash.slice(1);if(h==="pixel"||h==="palette")openId(h);else if(h==="guestbook")openGuest();}
 $("toGuest").onclick=()=>{leaveBooth();openGuest(shots[0]);};
 
 /* ---------- guest book (shared db: guestbook/<id> = {img, msg, name, theme, createdAt, by}) ---------- */
