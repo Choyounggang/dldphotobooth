@@ -558,30 +558,11 @@ $("save").addEventListener("click",()=>{if(lastBlob)saveBlob(lastBlob,`kitsch-bo
 const CUT={model:null,loading:null,queue:Promise.resolve()};
 function b64buf(s){const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u.buffer;}
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("script"));document.head.appendChild(s);});}
-// warm-up: load the engine + model and run it once on blank frames of the common camera shapes,
-// so the GPU programs are compiled before the pixel booth opens (same model, same output)
-const PX_IN=320,PX_RATIO=.8;
-let warmed=null;
-function warmModel(){
-  if(warmed)return warmed;
-  warmed=(async()=>{
-    const m=await getModel();
-    const x=tf.zeros([1,PX_IN,PX_IN,3]),z=tf.scalar(0),r=tf.scalar(PX_RATIO);let rec=null;
-    for(let i=0;i<2;i++){
-      const out=await m.executeAsync({src:x,r1i:rec?rec[0]:z,r2i:rec?rec[1]:z,r3i:rec?rec[2]:z,r4i:rec?rec[3]:z,downsample_ratio:r},["pha","r1o","r2o","r3o","r4o"]);
-      await out[0].data();tf.dispose(out[0]);if(rec)tf.dispose(rec);rec=out.slice(1);
-      await new Promise(res=>setTimeout(res,0));
-    }
-    tf.dispose([x,z,r,...rec]);
-    return m;
-  })().catch(e=>{warmed=null;throw e;});
-  return warmed;
-}
 async function getModel(){
   if(CUT.model)return CUT.model;
   if(!CUT.loading)CUT.loading=(async()=>{
     if(!window.tf)await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js");
-    try{await tf.setBackend("webgl");}catch(e){}await tf.ready();try{tf.enableProdMode();}catch(e){}
+    try{await tf.setBackend("webgl");}catch(e){}await tf.ready();
     let j,bin;
     if(window.RVM_INLINE){j=RVM_INLINE.json;bin=b64buf(RVM_INLINE.bin);}
     else{j=await(await fetch("models/rvm.json")).json();bin=b64buf((await(await fetch("models/rvm-weights.txt")).text()).trim());}
@@ -619,15 +600,15 @@ async function pxStep(){
   if(!src.mirror&&PX.stillDone===src.el)return;          // an uploaded photo only needs one pass
   PX.busy=true;
   try{
-    const m=await warmModel();PX.ready=true;PX.err=false;
+    const m=await getModel();PX.ready=true;PX.err=false;
     // grab a sharp colour frame and a small copy for the matting model from the same moment
     const kh=Math.min(1,720/Math.max(src.w,src.h)),HW=Math.round(src.w*kh),HH=Math.round(src.h*kh);
     const hi=document.createElement("canvas");hi.width=HW;hi.height=HH;const hc=hi.getContext("2d");
     if(src.mirror){hc.translate(HW,0);hc.scale(-1,1);}hc.drawImage(src.el,0,0,HW,HH);
-    const S=PX_IN,w=S,h=S,k=S/Math.max(HW,HH),cw=Math.round(HW*k),ch=Math.round(HH*k),ox=(S-cw)>>1,oy=(S-ch)>>1;
-    if(pxIn.width!==S){pxIn.width=S;pxIn.height=S;}
-    pxInCtx.fillStyle="#000";pxInCtx.fillRect(0,0,S,S);pxInCtx.drawImage(hi,ox,oy,cw,ch);
-    const x=tf.tidy(()=>tf.browser.fromPixels(pxIn).toFloat().div(255).expandDims(0)),z=tf.scalar(0),r=tf.scalar(PX_RATIO);
+    const k=Math.min(1,320/Math.max(src.w,src.h)),w=Math.max(8,Math.round(src.w*k/4)*4),h=Math.max(8,Math.round(src.h*k/4)*4);
+    if(pxIn.width!==w||pxIn.height!==h){pxIn.width=w;pxIn.height=h;if(PX.rec){tf.dispose(PX.rec);PX.rec=null;}}
+    pxInCtx.drawImage(hi,0,0,w,h);
+    const x=tf.tidy(()=>tf.browser.fromPixels(pxIn).toFloat().div(255).expandDims(0)),z=tf.scalar(0),r=tf.scalar(Math.min(1,256/Math.max(w,h)));
     const rec=PX.rec||[z,z,z,z];
     const out=await m.executeAsync({src:x,r1i:rec[0],r2i:rec[1],r3i:rec[2],r4i:rec[3],downsample_ratio:r},["pha","r1o","r2o","r3o","r4o"]);
     const a=await out[0].data();
@@ -642,7 +623,7 @@ async function pxStep(){
       // steady the crop box between video frames so the figure does not jump
       const raw={x:M.x0,y:M.y0,w:M.x1-M.x0+1,h:M.y1-M.y0+1};
       PX.box=PX.box&&src.mirror?{x:PX.box.x*.7+raw.x*.3,y:PX.box.y*.7+raw.y*.3,w:PX.box.w*.7+raw.w*.3,h:PX.box.h*.7+raw.h*.3}:raw;
-      PX.cut={hi,mask:mk,k:HW/cw,ox,oy};
+      PX.cut={hi,mask:mk,w,h,k:HW/w};
     }
     if(!src.mirror)PX.stillDone=src.el;
   }catch(e){console.error(e);PX.err=true;}
@@ -657,7 +638,7 @@ function buildHolo(dw,dh,cr){
   const C=PX.cut;holoCv.width=dw;holoCv.height=dh;const c=holoCtx;
   c.clearRect(0,0,dw,dh);c.imageSmoothingEnabled=true;c.imageSmoothingQuality="high";
   c.drawImage(C.hi,cr.x,cr.y,cr.w,cr.h,0,0,dw,dh);
-  c.globalCompositeOperation="destination-in";c.drawImage(C.mask,C.ox+cr.x/C.k,C.oy+cr.y/C.k,cr.w/C.k,cr.h/C.k,0,0,dw,dh);c.globalCompositeOperation="source-over";
+  c.globalCompositeOperation="destination-in";c.drawImage(C.mask,cr.x/C.k,cr.y/C.k,cr.w/C.k,cr.h/C.k,0,0,dw,dh);c.globalCompositeOperation="source-over";
   const id=c.getImageData(0,0,dw,dh),d=id.data;
   for(let o=0;o<d.length;o+=4){if(!d[o+3])continue;const lv=Math.round(.3*d[o]+.59*d[o+1]+.11*d[o+2]),l=lv*3;d[o]=BLUE_LUT[l];d[o+1]=BLUE_LUT[l+1];d[o+2]=BLUE_LUT[l+2];
     // whites fade a little so the room glows through the brightest skin
@@ -704,10 +685,7 @@ function leaveBooth(){cancelAnimationFrame(raf);theme=null;stopCam();still=null;
 $("back").addEventListener("click",()=>{leaveBooth();showView("desk");});
 const themeReady=buildThemes();
 const openId=id=>themeReady.then(()=>openTheme(THEMES.find(x=>x.id===id)));
-$("icHouse").onclick=()=>{warmModel().catch(()=>{});openId("pixel");};
-// start preparing as soon as someone heads for the house icon, or quietly once the desktop has settled
-["pointerenter","touchstart","focus"].forEach(ev=>$("icHouse").addEventListener(ev,()=>warmModel().catch(()=>{}),{once:true,passive:true}));
-window.addEventListener("load",()=>setTimeout(()=>{const go=()=>warmModel().catch(()=>{});window.requestIdleCallback?requestIdleCallback(go,{timeout:4000}):go();},1200));
+$("icHouse").onclick=()=>openId("pixel");
 $("icBrush").onclick=()=>openId("palette");
 $("icGuest").onclick=()=>openGuest();
 $("toGuest").onclick=()=>{leaveBooth();openGuest(shots[0]);};
